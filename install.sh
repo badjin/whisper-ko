@@ -7,7 +7,7 @@ set -e
 
 APP_NAME="Whisper Ko"
 INSTALL_DIR="$HOME/Applications/whisper-ko"
-REPO_URL="https://github.com/mfgc-bc-team/whisper-ko.git"
+REPO_URL="https://github.com/badjin/whisper-ko.git"
 MODEL="mlx-community/whisper-large-v3-turbo"
 
 # Colors

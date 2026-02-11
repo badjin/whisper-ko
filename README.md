@@ -19,13 +19,13 @@ macOS menu bar app for **voice dictation** and **real-time translation** powered
 ## Quick Install
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/mfgc-bc-team/whisper-ko/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/badjin/whisper-ko/main/install.sh | bash
 ```
 
 Or clone and install manually:
 
 ```bash
-git clone https://github.com/mfgc-bc-team/whisper-ko.git ~/Applications/whisper-ko
+git clone https://github.com/badjin/whisper-ko.git ~/Applications/whisper-ko
 cd ~/Applications/whisper-ko
 chmod +x install.sh
 ./install.sh
