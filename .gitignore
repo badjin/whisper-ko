@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Project
+temp-analysis/
+*.spec
+setup.py
+
+# Claude Code
+.claude/
+.omc/
+
+# Logs
+*.log
