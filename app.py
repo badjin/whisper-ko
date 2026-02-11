@@ -91,7 +91,8 @@ class WhisperKoApp(rumps.App):
         self._uiq: queue.Queue[callable] = queue.Queue()
 
         # ── 핫키 이벤트 (pynput 스레드 → Event → 메인 타이머) ──
-        self._dictation_event = threading.Event()
+        self._dictation_start_event = threading.Event()
+        self._dictation_stop_event = threading.Event()
         self._translation_event = threading.Event()
 
         # ── 타이머: UI 큐 drain + 이벤트 처리 (50ms) ────
@@ -144,10 +145,16 @@ class WhisperKoApp(rumps.App):
 
     def _drain_mainloop(self, _) -> None:
         """50ms마다 호출: 핫키 이벤트 처리 + UI 큐 drain."""
-        # 1) 핫키 이벤트 처리
-        if self._dictation_event.is_set():
-            self._dictation_event.clear()
-            self.toggle_dictation(None)
+        # 1) 핫키 이벤트 처리 (받아쓰기: push-to-talk)
+        if self._dictation_start_event.is_set():
+            self._dictation_start_event.clear()
+            if not self.is_dictating:
+                self._start_dictation()
+
+        if self._dictation_stop_event.is_set():
+            self._dictation_stop_event.clear()
+            if self.is_dictating:
+                self._stop_dictation()
 
         if self._translation_event.is_set():
             self._translation_event.clear()
@@ -170,8 +177,12 @@ class WhisperKoApp(rumps.App):
 
     def _register_hotkeys(self) -> None:
         """설정에 따라 핫키를 등록한다."""
-        dictation_hk = self.cfg.get("dictation_hotkey", "ctrl+shift+m")
-        self._hotkey_mgr.register(dictation_hk, self._dictation_event.set)
+        dictation_hk = self.cfg.get("dictation_hotkey", "ctrl+shift+a")
+        self._hotkey_mgr.register(
+            dictation_hk,
+            self._dictation_start_event.set,
+            on_release=self._dictation_stop_event.set,
+        )
 
         translation_hk = self.cfg.get("translation_hotkey", "ctrl+shift+t")
         self._hotkey_mgr.register(translation_hk, self._translation_event.set)

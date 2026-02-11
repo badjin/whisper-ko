@@ -117,6 +117,7 @@ class HotkeyManager:
 
     def __init__(self) -> None:
         self._bindings: dict[str, tuple[frozenset, Callable]] = {}
+        self._release_bindings: dict[str, tuple[frozenset, Callable]] = {}
         # 핫키별 "이미 발화됨" 플래그 (키를 뗄 때까지 재발화 방지)
         self._fired: dict[str, bool] = {}
         self._current_keys: set = set()
@@ -125,11 +126,18 @@ class HotkeyManager:
 
     # ── 등록 / 해제 ──────────────────────────────────────
 
-    def register(self, hotkey_str: str, callback: Callable) -> None:
+    def register(
+        self,
+        hotkey_str: str,
+        callback: Callable,
+        on_release: Callable | None = None,
+    ) -> None:
         """핫키 문자열과 콜백을 등록.
 
-        동일한 hotkey_str로 재등록하면 기존 바인딩을 덮어쓴다.
-        리스너가 이미 실행 중이면 즉시 반영된다.
+        Args:
+            hotkey_str: 핫키 문자열 (예: "ctrl+shift+a")
+            callback: 키를 눌렀을 때 호출되는 콜백
+            on_release: 키를 뗐을 때 호출되는 콜백 (push-to-talk용)
         """
         keys = parse_hotkey(hotkey_str)
         if not keys:
@@ -137,12 +145,15 @@ class HotkeyManager:
         with self._lock:
             self._bindings[hotkey_str] = (keys, callback)
             self._fired[hotkey_str] = False
+            if on_release is not None:
+                self._release_bindings[hotkey_str] = (keys, on_release)
 
     def unregister(self, hotkey_str: str) -> None:
         """등록된 핫키를 해제."""
         with self._lock:
             self._bindings.pop(hotkey_str, None)
             self._fired.pop(hotkey_str, None)
+            self._release_bindings.pop(hotkey_str, None)
 
     # ── 리스너 시작 / 중지 ───────────────────────────────
 
@@ -189,5 +200,13 @@ class HotkeyManager:
 
         with self._lock:
             for hk_str, (keyset, _callback) in self._bindings.items():
+                was_fired = self._fired.get(hk_str, False)
                 if not keyset.issubset(self._current_keys):
                     self._fired[hk_str] = False
+                    # 키가 눌린 상태에서 릴리즈 시 on_release 콜백 호출
+                    if was_fired and hk_str in self._release_bindings:
+                        _, release_cb = self._release_bindings[hk_str]
+                        try:
+                            release_cb()
+                        except Exception:
+                            pass
