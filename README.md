@@ -39,8 +39,20 @@ chmod +x install.sh
 - Homebrew / Python / PortAudio / BlackHole 설치 확인
 - Python 가상환경 생성 및 패키지 설치
 - Whisper 모델 다운로드 (~1.5GB, 최초 1회)
-- .app 번들 생성 및 /Applications 등록
+- .app 번들 생성, 코드 서명 및 /Applications 등록
 - Google Translate API 키 입력 안내
+
+### 첫 실행 시 macOS 권한 허용
+
+앱을 처음 사용할 때 macOS가 다음 권한을 요청합니다. 모두 **"허용"**을 눌러주세요:
+
+| 권한 | 표시 이름 | 용도 |
+|------|----------|------|
+| Input Monitoring | python3 | 글로벌 단축키 감지 |
+| Accessibility | python3 | 텍스트 붙여넣기 (Cmd+V) |
+| Microphone | python3 | 음성 녹음 (받아쓰기 모드) |
+
+> **참고**: 앱이 Python으로 실행되므로 권한 팝업에 "python3"으로 표시됩니다. 정상입니다.
 
 ## BlackHole 설정 (번역 모드용)
 
@@ -107,7 +119,7 @@ chmod +x install.sh
 ## 문제 해결
 
 ### 받아쓰기 후 텍스트가 붙여넣기 안 됨
-손쉬운 사용 권한을 부여해야 합니다: **시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용** → Python 또는 Whisper Ko 앱 추가
+**시스템 설정 → 개인정보 보호 및 보안 → 손쉬운 사용**에서 python3이 허용되어 있는지 확인하세요.
 
 ### 번역 모드에서 오디오가 캡처 안 됨
 시스템 사운드 출력이 **다중 출력 기기**로 설정되어 있는지 확인하세요 (스피커 직접 출력이 아닌).

@@ -134,6 +134,23 @@ exec arch -arm64 "\${VENV}" "\${PROJECT}/app.py" 2>/tmp/whisper-ko-stderr.log
 LAUNCHER
 chmod +x "$MACOS_DIR/whisper-ko"
 
+# App icon
+RESOURCES_DIR="$APP_DIR/Contents/Resources"
+mkdir -p "$RESOURCES_DIR"
+ICON_SRC="$INSTALL_DIR/logo_192.png"
+if [ -f "$ICON_SRC" ] && command -v iconutil &>/dev/null; then
+    ICONSET=$(mktemp -d)/icon.iconset
+    mkdir -p "$ICONSET"
+    sips -z 16 16 "$ICON_SRC" --out "$ICONSET/icon_16x16.png" &>/dev/null
+    sips -z 32 32 "$ICON_SRC" --out "$ICONSET/icon_16x16@2x.png" &>/dev/null
+    sips -z 32 32 "$ICON_SRC" --out "$ICONSET/icon_32x32.png" &>/dev/null
+    sips -z 64 64 "$ICON_SRC" --out "$ICONSET/icon_32x32@2x.png" &>/dev/null
+    sips -z 128 128 "$ICON_SRC" --out "$ICONSET/icon_128x128.png" &>/dev/null
+    cp "$ICON_SRC" "$ICONSET/icon_128x128@2x.png"
+    iconutil -c icns "$ICONSET" -o "$RESOURCES_DIR/AppIcon.icns" 2>/dev/null
+    rm -rf "$(dirname "$ICONSET")"
+fi
+
 # Info.plist
 cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -143,16 +160,32 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
 <dict>
     <key>CFBundleName</key>
     <string>Whisper Ko</string>
+    <key>CFBundleDisplayName</key>
+    <string>Whisper Ko</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.jinkim.whisper-ko</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
     <key>CFBundleExecutable</key>
     <string>whisper-ko</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.whisper-ko.app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>음성 인식을 위해 마이크 접근이 필요합니다.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>텍스트 붙여넣기를 위해 접근성 권한이 필요합니다.</string>
 </dict>
 </plist>
 PLIST
 
+# Ad-hoc codesign (마이크 권한 등 개인정보 설정에 필요)
+codesign --force --deep --sign - "$APP_DIR" 2>/dev/null
 ok "App bundle created at: $APP_DIR"
 
 # ─── 9. Create restart script ──────────────────────────

@@ -168,9 +168,8 @@ class SubtitleOverlay:
 
         self._panel.contentView().addSubview_(self._text_view)
 
-        # 초기 상태: 숨김 (alpha 0이지만 orderFront 상태)
+        # 초기 상태: 숨김 (orderOut 상태, show() 시 orderFront)
         self._panel.setAlphaValue_(0.0)
-        self._panel.orderFront_(None)
 
     # ══════════════════════════════════════════════════════
     # 공개 API
@@ -234,6 +233,7 @@ class SubtitleOverlay:
 
         self._cancel_fade_timer()
         self._panel.setAlphaValue_(0.0)
+        self._panel.orderOut_(None)
 
     def clear(self) -> None:
         """자막 버퍼를 비우고 오버레이를 숨긴다."""
@@ -273,6 +273,8 @@ class SubtitleOverlay:
         if self._fade_timer is not None:
             self._fade_timer.invalidate()
             self._fade_timer = None
+        # 콜백을 항상 원래 페이드로 복원 (orderOut 콜백이 남아있을 수 있음)
+        self._fade_target.set_callback(self._do_fade)
 
     def _do_fade(self) -> None:
         """NSAnimationContext를 사용하여 2초에 걸쳐 페이드 아웃한다."""
@@ -281,7 +283,27 @@ class SubtitleOverlay:
         if self._panel is None:
             return
 
+        # 페이드 완료 후 orderOut 하기 위한 타이머 설정
+        self._fade_timer = Foundation.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+            2.1,  # 페이드 duration(2초) + 여유
+            self._fade_target,
+            b"fire:",
+            None,
+            False,
+        )
+        # 콜백을 orderOut으로 교체 (1회성)
+        self._fade_target.set_callback(self._do_order_out)
+
         AppKit.NSAnimationContext.beginGrouping()
         AppKit.NSAnimationContext.currentContext().setDuration_(2.0)
         self._panel.animator().setAlphaValue_(0.0)
         AppKit.NSAnimationContext.endGrouping()
+
+    def _do_order_out(self) -> None:
+        """페이드 완료 후 패널을 윈도우 스택에서 제거한다."""
+        self._fade_timer = None
+        # 콜백을 원래 페이드로 복원
+        self._fade_target.set_callback(self._do_fade)
+
+        if self._panel is not None:
+            self._panel.orderOut_(None)

@@ -14,9 +14,17 @@ import threading
 import time
 import traceback
 
+import AppKit
 import pyautogui
 import pyperclip
 import rumps
+
+# ── Dock 아이콘 숨기기 ──────────────────────────────────────────
+# .app 번들의 LSUIElement 대신 Python 프로세스 자체에서 설정
+# (exec으로 Python에 교체되면 .app의 Info.plist가 적용되지 않음)
+AppKit.NSApplication.sharedApplication().setActivationPolicy_(
+    AppKit.NSApplicationActivationPolicyAccessory  # 1 = Dock 아이콘 없음
+)
 
 from config import load_config, save_config
 from audio.mic import MicRecorder
