@@ -1,8 +1,6 @@
-"""PyAudio 디바이스 열거 및 BlackHole 감지."""
+"""PyAudio 디바이스 열거."""
 
 from __future__ import annotations
-
-from typing import Optional
 
 import pyaudio
 
@@ -29,27 +27,6 @@ def list_input_devices() -> list[dict]:
                     }
                 )
         return devices
-    finally:
-        pa.terminate()
-
-
-def find_blackhole_device(name: str = "BlackHole 2ch") -> Optional[int]:
-    """BlackHole 가상 오디오 디바이스의 인덱스를 찾는다.
-
-    Args:
-        name: 검색할 디바이스 이름 (기본값: "BlackHole 2ch")
-
-    Returns:
-        디바이스 인덱스 또는 찾지 못한 경우 None
-    """
-    pa = pyaudio.PyAudio()
-    try:
-        for i in range(pa.get_device_count()):
-            info = pa.get_device_info_by_index(i)
-            if name.lower() in info.get("name", "").lower():
-                if info.get("maxInputChannels", 0) > 0:
-                    return i
-        return None
     finally:
         pa.terminate()
 

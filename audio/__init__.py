@@ -2,7 +2,6 @@
 
 from audio.devices import (
     get_default_input_device,
-    find_blackhole_device,
     list_input_devices,
 )
 from audio.mic import MicRecorder
@@ -10,7 +9,6 @@ from audio.system import SystemAudioCapture
 
 __all__ = [
     "get_default_input_device",
-    "find_blackhole_device",
     "list_input_devices",
     "MicRecorder",
     "SystemAudioCapture",

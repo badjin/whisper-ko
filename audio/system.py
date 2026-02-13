@@ -1,6 +1,6 @@
 """시스템 오디오 캡처 모듈 (Mode 2: 번역).
 
-BlackHole 가상 디바이스로 시스템 오디오를 캡처하고,
+ScreenCaptureKit Swift 바이너리로 시스템 오디오를 캡처하고,
 RMS 에너지 기반 무음 감지로 청크를 분할하여 콜백으로 전달한다.
 """
 
@@ -10,33 +10,38 @@ import logging
 import math
 import os
 import queue
+import subprocess
 import tempfile
 import threading
 import wave
 from typing import Callable, Optional
 
 import numpy as np
-import pyaudio
 
 from config import DEFAULTS
 
 logger = logging.getLogger(__name__)
 
-# 오디오 포맷 상수 (mic.py와 동일)
-FORMAT = pyaudio.paInt16
+# 오디오 포맷 상수
 CHANNELS = 1
 RATE = 16000
 CHUNK = 1024
+SAMPLE_WIDTH = 2  # Int16 = 2바이트
 
 # paInt16 최대값 (dB 기준점)
 MAX_INT16 = 32768.0
+
+# Swift 바이너리 경로
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SWIFT_SRC = os.path.join(_SCRIPT_DIR, "sck_capture.swift")
+_SWIFT_BIN = os.path.join(_SCRIPT_DIR, "sck_capture")
 
 
 def _compute_rms_db(data: bytes) -> float:
     """오디오 프레임의 RMS 에너지를 dB로 계산한다.
 
     Args:
-        data: paInt16 형식의 raw 오디오 바이트
+        data: Int16 형식의 raw 오디오 바이트
 
     Returns:
         RMS 에너지 (dB). 무음이면 -float('inf') 반환.
@@ -48,15 +53,59 @@ def _compute_rms_db(data: bytes) -> float:
     return 20.0 * math.log10(rms / MAX_INT16)
 
 
+def _ensure_binary() -> str:
+    """Swift 바이너리가 최신인지 확인하고, 필요하면 컴파일한다.
+
+    Returns:
+        바이너리 절대 경로
+
+    Raises:
+        FileNotFoundError: Swift 소스가 없는 경우
+        RuntimeError: 컴파일 실패
+    """
+    if not os.path.exists(_SWIFT_SRC):
+        raise FileNotFoundError(f"Swift 소스를 찾을 수 없습니다: {_SWIFT_SRC}")
+
+    need_compile = False
+    if not os.path.exists(_SWIFT_BIN):
+        need_compile = True
+    else:
+        src_mtime = os.path.getmtime(_SWIFT_SRC)
+        bin_mtime = os.path.getmtime(_SWIFT_BIN)
+        if src_mtime > bin_mtime:
+            need_compile = True
+
+    if need_compile:
+        logger.info("Swift 바이너리 컴파일 중: %s", _SWIFT_SRC)
+        result = subprocess.run(
+            [
+                "swiftc", "-O",
+                "-o", _SWIFT_BIN,
+                _SWIFT_SRC,
+                "-framework", "ScreenCaptureKit",
+                "-framework", "CoreMedia",
+                "-framework", "AVFoundation",
+                "-framework", "Foundation",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Swift 컴파일 실패 (code {result.returncode}):\n{result.stderr}"
+            )
+        logger.info("Swift 바이너리 컴파일 완료")
+
+    return _SWIFT_BIN
+
+
 class SystemAudioCapture:
-    """BlackHole 시스템 오디오 캡처 + 에너지 기반 청크 분할.
+    """ScreenCaptureKit 시스템 오디오 캡처 + 에너지 기반 청크 분할.
 
     사용 예시::
 
-        from audio.devices import find_blackhole_device
-
-        dev_idx = find_blackhole_device()
-        capture = SystemAudioCapture(device_index=dev_idx, config=config)
+        capture = SystemAudioCapture(config=config)
         capture.start(on_chunk_ready=lambda path: print(f"청크: {path}"))
         # ... 캡처 중 ...
         capture.stop()
@@ -64,13 +113,11 @@ class SystemAudioCapture:
 
     def __init__(
         self,
-        device_index: int,
         rate: int = RATE,
         channels: int = CHANNELS,
         chunk: int = CHUNK,
         config: Optional[dict] = None,
     ) -> None:
-        self._device_index = device_index
         self._rate = rate
         self._channels = channels
         self._chunk = chunk
@@ -102,8 +149,7 @@ class SystemAudioCapture:
         # 상태
         self._capturing = False
         self._on_chunk_ready: Optional[Callable[[str], None]] = None
-        self._audio: Optional[pyaudio.PyAudio] = None
-        self._stream: Optional[pyaudio.Stream] = None
+        self._process: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._worker_thread: Optional[threading.Thread] = None
         self._chunk_queue: queue.Queue[Optional[str]] = queue.Queue()
@@ -123,29 +169,48 @@ class SystemAudioCapture:
 
         Raises:
             RuntimeError: 이미 캡처 중인 경우
-            OSError: 오디오 스트림을 열 수 없는 경우
+            FileNotFoundError: Swift 소스가 없는 경우
+            PermissionError: Screen Recording 권한이 거부된 경우
+            OSError: 캡처 시작 실패
         """
         with self._lock:
             if self._capturing:
                 raise RuntimeError("이미 캡처 중입니다")
 
             self._on_chunk_ready = on_chunk_ready
-            self._audio = pyaudio.PyAudio()
 
+            # Swift 바이너리 확인/컴파일
+            binary = _ensure_binary()
+
+            # subprocess 시작
             try:
-                self._stream = self._audio.open(
-                    format=FORMAT,
-                    channels=self._channels,
-                    rate=self._rate,
-                    input=True,
-                    frames_per_buffer=self._chunk,
-                    input_device_index=self._device_index,
+                self._process = subprocess.Popen(
+                    [
+                        binary,
+                        "--sample-rate", str(self._rate),
+                        "--channels", str(self._channels),
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
                 )
             except Exception as e:
-                self._cleanup()
-                raise OSError(
-                    f"BlackHole 오디오 스트림을 열 수 없습니다: {e}"
-                ) from e
+                raise OSError(f"오디오 캡처 프로세스를 시작할 수 없습니다: {e}") from e
+
+            # 프로세스가 즉시 종료되었는지 확인 (권한 에러 등)
+            try:
+                retcode = self._process.wait(timeout=1.0)
+                stderr_out = self._process.stderr.read().decode(errors="replace")
+                self._process = None
+                if retcode == 1:
+                    raise PermissionError(
+                        "Screen Recording 권한이 필요합니다. "
+                        "시스템 설정 > 개인정보 보호 및 보안 > 화면 녹화에서 허용해주세요."
+                    )
+                raise OSError(f"오디오 캡처 실패 (code {retcode}): {stderr_out}")
+            except subprocess.TimeoutExpired:
+                # 정상 — 프로세스가 실행 중
+                pass
 
             self._capturing = True
 
@@ -172,6 +237,21 @@ class SystemAudioCapture:
                 return
             self._capturing = False
 
+        # Swift 프로세스 종료
+        if self._process is not None:
+            try:
+                self._process.terminate()
+            except Exception:
+                pass
+            try:
+                self._process.wait(timeout=5.0)
+            except Exception:
+                try:
+                    self._process.kill()
+                except Exception:
+                    pass
+            self._process = None
+
         # 캡처 스레드 종료 대기
         if self._thread is not None:
             self._thread.join(timeout=3.0)
@@ -183,63 +263,81 @@ class SystemAudioCapture:
             self._worker_thread.join(timeout=10.0)
             self._worker_thread = None
 
-        # 스트림 및 PyAudio 정리
-        self._close_stream()
-        self._cleanup()
-
     def _capture_loop(self) -> None:
         """캡처 루프 (백그라운드 스레드).
 
-        오디오 프레임을 읽으면서 에너지를 모니터링하고,
+        Swift 프로세스의 stdout에서 PCM 프레임을 읽으면서 에너지를 모니터링하고,
         무음 감지 또는 최대 길이 초과 시 청크를 분할한다.
+
+        파이프에서 read()가 가변 크기를 반환하므로,
+        내부 버퍼로 정확히 CHUNK 샘플 단위의 프레임을 조립한다.
         """
         frames: list[bytes] = []
         frame_count = 0
         silent_frames = 0
         has_audio = False  # 실제 소리가 있었는지 추적
+        frame_bytes = self._chunk * SAMPLE_WIDTH * self._channels  # 한 프레임 바이트
+        read_size = frame_bytes * 4  # 파이프에서 큰 단위로 읽기
+
+        _buf = b""  # 내부 버퍼
 
         while self._capturing:
-            try:
-                data = self._stream.read(self._chunk, exception_on_overflow=False)
-            except Exception:
-                logger.exception("오디오 스트림 읽기 실패, 캡처 중단")
-                self._capturing = False
+            # 버퍼에 한 프레임 이상 쌓일 때까지 읽기
+            while len(_buf) < frame_bytes:
+                try:
+                    chunk = self._process.stdout.read(read_size)
+                    if not chunk:
+                        logger.info("오디오 캡처 프로세스 종료됨")
+                        self._capturing = False
+                        break
+                except Exception:
+                    logger.exception("오디오 스트림 읽기 실패, 캡처 중단")
+                    self._capturing = False
+                    break
+                _buf += chunk
+
+            if not self._capturing:
                 break
 
-            frames.append(data)
-            frame_count += 1
+            # 버퍼에서 정확히 frame_bytes 단위로 꺼내서 처리
+            while len(_buf) >= frame_bytes and self._capturing:
+                data = _buf[:frame_bytes]
+                _buf = _buf[frame_bytes:]
 
-            # RMS 에너지 계산
-            rms_db = _compute_rms_db(data)
+                frames.append(data)
+                frame_count += 1
 
-            if rms_db <= self._silence_threshold_db:
-                silent_frames += 1
-            else:
-                silent_frames = 0
-                has_audio = True
+                # RMS 에너지 계산
+                rms_db = _compute_rms_db(data)
 
-            # 청크 분할 조건 확인
-            should_split = False
+                if rms_db <= self._silence_threshold_db:
+                    silent_frames += 1
+                else:
+                    silent_frames = 0
+                    has_audio = True
 
-            # 조건 1: 무음 구간이 임계값을 초과하고 실제 오디오가 있었던 경우
-            if (
-                silent_frames >= self._silence_frames_limit
-                and has_audio
-                and frame_count > self._silence_frames_limit
-            ):
-                should_split = True
+                # 청크 분할 조건 확인
+                should_split = False
 
-            # 조건 2: 최대 청크 길이 초과 (강제 분할)
-            if frame_count >= self._max_chunk_frames:
-                should_split = True
+                # 조건 1: 무음 구간이 임계값을 초과하고 실제 오디오가 있었던 경우
+                if (
+                    silent_frames >= self._silence_frames_limit
+                    and has_audio
+                    and frame_count > self._silence_frames_limit
+                ):
+                    should_split = True
 
-            if should_split:
-                if has_audio:
-                    self._flush_chunk(frames)
-                frames = []
-                frame_count = 0
-                silent_frames = 0
-                has_audio = False
+                # 조건 2: 최대 청크 길이 초과 (강제 분할)
+                if frame_count >= self._max_chunk_frames:
+                    should_split = True
+
+                if should_split:
+                    if has_audio:
+                        self._flush_chunk(frames)
+                    frames = []
+                    frame_count = 0
+                    silent_frames = 0
+                    has_audio = False
 
         # 루프 종료 시 남은 프레임 flush
         if frames and has_audio:
@@ -288,7 +386,7 @@ class SystemAudioCapture:
 
             wf = wave.open(path, "wb")
             wf.setnchannels(self._channels)
-            wf.setsampwidth(pyaudio.get_sample_size(FORMAT))
+            wf.setsampwidth(SAMPLE_WIDTH)
             wf.setframerate(self._rate)
             wf.writeframes(b"".join(frames))
             wf.close()
@@ -297,25 +395,3 @@ class SystemAudioCapture:
         except Exception:
             logger.exception("WAV 파일 저장 실패")
             return None
-
-    def _close_stream(self) -> None:
-        """오디오 스트림을 안전하게 닫는다."""
-        if self._stream is not None:
-            try:
-                self._stream.stop_stream()
-            except Exception:
-                pass
-            try:
-                self._stream.close()
-            except Exception:
-                pass
-            self._stream = None
-
-    def _cleanup(self) -> None:
-        """PyAudio 인스턴스를 정리한다."""
-        if self._audio is not None:
-            try:
-                self._audio.terminate()
-            except Exception:
-                pass
-            self._audio = None

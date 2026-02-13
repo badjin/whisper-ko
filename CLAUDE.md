@@ -5,7 +5,7 @@ macOS 메뉴바 음성인식 앱. 원본 `borinomi/mlx-whisper`를 확장하여 
 ## 프로젝트 개요
 
 - **Mode 1 (받아쓰기)**: 마이크 → MLX Whisper → 한국어 텍스트 → 커서 위치에 Cmd+V 붙여넣기
-- **Mode 2 (번역)**: 시스템 오디오(BlackHole) → Whisper → Google Cloud Translate → `[timestamp] 영어 - 한글` 출력
+- **Mode 2 (번역)**: 시스템 오디오(ScreenCaptureKit) → Whisper → Google Cloud Translate → `[timestamp] 영어 - 한글` 출력
 
 두 모드는 상호배제 (GPU 경합 방지).
 
@@ -19,9 +19,10 @@ whisper-ko/
 ├── menu.py               # rumps 메뉴 빌더
 ├── audio/
 │   ├── __init__.py
-│   ├── devices.py        # PyAudio 디바이스 열거, BlackHole 감지
+│   ├── devices.py        # PyAudio 디바이스 열거
 │   ├── mic.py            # 마이크 녹음 (Mode 1)
-│   └── system.py         # BlackHole 시스템 오디오 캡처 + 청크 분할 (Mode 2)
+│   ├── system.py         # ScreenCaptureKit 시스템 오디오 캡처 + 청크 분할 (Mode 2)
+│   └── sck_capture.swift # Swift CLI — ScreenCaptureKit → stdout PCM
 ├── transcribe.py         # MLX Whisper 래퍼
 ├── translate.py          # Google Cloud Translation API v2 (requests)
 ├── output/
@@ -35,7 +36,7 @@ whisper-ko/
 ## 기술 스택
 
 - **UI**: rumps (macOS 메뉴바), PyObjC (오버레이 창)
-- **오디오**: PyAudio (마이크/시스템 오디오 캡처)
+- **오디오**: PyAudio (마이크), ScreenCaptureKit via Swift CLI (시스템 오디오)
 - **음성인식**: mlx-whisper (Apple Silicon 최적화)
 - **번역**: Google Cloud Translation API v2 (requests로 직접 호출)
 - **핫키**: pynput (글로벌 키보드 리스너)
@@ -45,6 +46,7 @@ whisper-ko/
 
 | 항목 | 결정 | 이유 |
 |------|------|------|
+| 시스템 오디오 | ScreenCaptureKit (Swift CLI) | BlackHole Multi-Output 문제 해결, PyObjC 바인딩 버그 우회 |
 | 무음 감지 | RMS 에너지 기반 | 시스템 오디오에 음악/효과음 포함, webrtcvad보다 범용적 |
 | 번역 API | requests + REST v2 | google-cloud-translate는 의존성 50+개, API키 인증엔 requests 충분 |
 | 오버레이 | PyObjC (AppKit) | rumps가 이미 NSApplication 사용, 별도 이벤트루프 충돌 방지 |
@@ -62,7 +64,7 @@ whisper-ko/
   "translation_output": "overlay",
   "google_translate_api_key": "",
   "overlay": { "font_size": 16, "max_lines": 5, "fade_seconds": 10, "opacity": 0.7 },
-  "audio": { "blackhole_device_name": "BlackHole 2ch", "silence_threshold_db": -40, "silence_duration_sec": 1.5, "max_chunk_sec": 30 },
+  "audio": { "silence_threshold_db": -40, "silence_duration_sec": 1.5, "max_chunk_sec": 30 },
   "log_dir": "~/Documents/whisper-ko-logs"
 }
 ```
@@ -95,7 +97,7 @@ python app.py
 ## 구현 Phase
 
 1. **Phase 1**: 코어 + 받아쓰기 (config, audio/devices, audio/mic, transcribe, clipboard, hotkeys, menu, app)
-2. **Phase 2**: 시스템 오디오 캡처 (audio/system - BlackHole + 에너지 기반 청크 분할)
+2. **Phase 2**: 시스템 오디오 캡처 (audio/system - ScreenCaptureKit + 에너지 기반 청크 분할)
 3. **Phase 3**: 번역 파이프라인 (translate, logfile, Mode 2 통합)
 4. **Phase 4**: 오버레이 자막 (overlay, 출력 디스패처)
 5. **Phase 5**: 마무리 (에러 핸들링, API 키 다이얼로그, 출력 전환 메뉴, 아이콘 상태)

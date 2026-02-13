@@ -25,5 +25,8 @@ setup.py
 .claude/
 .omc/
 
+# Compiled binaries
+audio/sck_capture
+
 # Logs
 *.log

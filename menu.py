@@ -13,7 +13,7 @@ Mode 1 (Dictation) + Mode 2 (Translation) menu structure:
   │   │   ├── Dictation: ...
   │   │   └── Translation: ...
   │   ├── Google Translate API Key
-  │   ├── BlackHole Status
+  │   ├── Screen Recording Permission
   └── Quit
 """
 
@@ -81,12 +81,8 @@ def build_menu(app: WhisperKoApp) -> None:
     # ── Translation toggle ──────────────────────────────
     translation_hk = config.get("translation_hotkey", "ctrl+shift+t")
     thk_display = format_hotkey(translation_hk)
-    blackhole_available = getattr(app, "_blackhole_idx", None) is not None
 
-    if not blackhole_available:
-        tlabel = "Translation Unavailable (BlackHole required)"
-        translation_item = rumps.MenuItem(tlabel)
-    elif app.is_translating:
+    if app.is_translating:
         tlabel = f"Stop Translation ({thk_display})"
         translation_item = rumps.MenuItem(tlabel, callback=app.toggle_translation)
     else:
@@ -150,14 +146,22 @@ def build_menu(app: WhisperKoApp) -> None:
     )
     settings_submenu.add(api_item)
 
-    # BlackHole status
-    if blackhole_available:
-        bh_item = rumps.MenuItem("BlackHole: Detected")
-    else:
-        bh_item = rumps.MenuItem(
-            "BlackHole: Not Found (brew install blackhole-2ch)"
-        )
-    settings_submenu.add(bh_item)
+    # Screen Recording permission
+    def _open_screen_recording_settings(_):
+        import subprocess
+        try:
+            subprocess.Popen([
+                "open",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+            ])
+        except Exception:
+            pass
+
+    sr_item = rumps.MenuItem(
+        "Screen Recording Permission",
+        callback=_open_screen_recording_settings,
+    )
+    settings_submenu.add(sr_item)
 
     menu.add(settings_submenu)
 

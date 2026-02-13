@@ -24,7 +24,6 @@ DEFAULTS: dict = {
         "opacity": 0.85,
     },
     "audio": {
-        "blackhole_device_name": "BlackHole 2ch",
         "silence_threshold_db": -40,
         "silence_duration_sec": 0.8,
         "max_chunk_sec": 8,

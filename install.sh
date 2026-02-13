@@ -55,14 +55,6 @@ if ! brew list portaudio &>/dev/null; then
 fi
 ok "PortAudio ready"
 
-if ! brew list blackhole-2ch &>/dev/null; then
-    info "Installing BlackHole 2ch (virtual audio device)..."
-    brew install blackhole-2ch
-    warn "BlackHole installed. You need to set up Multi-Output Device in Audio MIDI Setup."
-    warn "See README for instructions."
-fi
-ok "BlackHole ready"
-
 # ─── 4. Check Python 3.10+ ─────────────────────────────
 PYTHON=""
 for p in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
@@ -107,6 +99,21 @@ info "Installing Python packages (this may take a few minutes)..."
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 ok "Python packages installed"
+
+# ─── 6.5. Compile Swift audio capture binary ─────────
+info "Compiling Swift audio capture binary..."
+if command -v swiftc &>/dev/null; then
+    swiftc -O \
+        -o "$INSTALL_DIR/audio/sck_capture" \
+        "$INSTALL_DIR/audio/sck_capture.swift" \
+        -framework ScreenCaptureKit \
+        -framework CoreMedia \
+        -framework AVFoundation \
+        -framework Foundation \
+        2>/dev/null && ok "Swift binary compiled" || warn "Swift compilation failed (will auto-compile on first use)"
+else
+    warn "swiftc not found. Install Xcode Command Line Tools: xcode-select --install"
+fi
 
 # ─── 7. Download Whisper model ──────────────────────────
 info "Downloading Whisper model (~1.5GB, first time only)..."
@@ -181,6 +188,8 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <string>음성 인식을 위해 마이크 접근이 필요합니다.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>텍스트 붙여넣기를 위해 접근성 권한이 필요합니다.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>시스템 오디오 캡처를 위해 화면 녹화 권한이 필요합니다.</string>
 </dict>
 </plist>
 PLIST
@@ -257,8 +266,9 @@ echo "  Hotkeys:"
 echo "    Ctrl+Shift+A  →  Start/Stop Dictation"
 echo "    Ctrl+Shift+S  →  Start/Stop Translation"
 echo ""
-echo "  ⚠️  First launch: Grant Accessibility permission"
+echo "  ⚠️  First launch: Grant required permissions"
 echo "      System Settings > Privacy & Security > Accessibility"
+echo "      System Settings > Privacy & Security > Screen Recording"
 echo ""
 
 # Auto-launch

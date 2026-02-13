@@ -2,7 +2,7 @@
 
 macOS 메뉴바 음성인식 앱의 진입점.
 Mode 1 (받아쓰기): 마이크 → Whisper → 텍스트 → Cmd+V 붙여넣기
-Mode 2 (번역): 시스템 오디오(BlackHole) → Whisper → Google Translate → 출력
+Mode 2 (번역): 시스템 오디오(ScreenCaptureKit) → Whisper → Google Translate → 출력
 """
 
 from __future__ import annotations
@@ -27,7 +27,6 @@ AppKit.NSApplication.sharedApplication().setActivationPolicy_(
 
 from config import load_config, save_config
 from audio.mic import MicRecorder
-from audio.devices import find_blackhole_device
 from audio.system import SystemAudioCapture
 from transcribe import transcribe, preload_model
 from translate import translate_text
@@ -84,9 +83,7 @@ class WhisperKoApp(rumps.App):
         self._recorder = MicRecorder()
 
         # ── 오디오 (Mode 2: 시스템 오디오) ────────────────
-        self._sys_capture: SystemAudioCapture | None = None
-        self._blackhole_idx: int | None = None
-        self._detect_blackhole()
+        self._sys_capture = SystemAudioCapture(config=self.cfg)
 
         # ── 번역 출력 모듈 ───────────────────────────────
         self._overlay = SubtitleOverlay(self.cfg.get("overlay", {}))
@@ -113,25 +110,6 @@ class WhisperKoApp(rumps.App):
 
         # ── 메뉴 구성 ───────────────────────────────────
         build_menu(self)
-
-    # ══════════════════════════════════════════════════════
-    # BlackHole 감지
-    # ══════════════════════════════════════════════════════
-
-    def _detect_blackhole(self) -> None:
-        """BlackHole 가상 오디오 디바이스를 탐색한다."""
-        bh_name = self.cfg.get("audio", {}).get(
-            "blackhole_device_name", "BlackHole 2ch"
-        )
-        try:
-            self._blackhole_idx = find_blackhole_device(bh_name)
-        except Exception:
-            self._blackhole_idx = None
-
-        if self._blackhole_idx is not None:
-            self._sys_capture = SystemAudioCapture(
-                device_index=self._blackhole_idx, config=self.cfg
-            )
 
     # ══════════════════════════════════════════════════════
     # UI 큐 (메인 스레드 전용)
@@ -312,11 +290,6 @@ class WhisperKoApp(rumps.App):
         if self.is_dictating:
             self._stop_dictation()
 
-        # BlackHole 확인
-        if self._sys_capture is None:
-            logger.error("BlackHole 미설치")
-            return
-
         # API 키 확인 — 없으면 설정 다이얼로그 자동 표시
         api_key = self.cfg.get("google_translate_api_key", "")
         if not api_key:
@@ -331,6 +304,22 @@ class WhisperKoApp(rumps.App):
 
         try:
             self._sys_capture.start(on_chunk_ready=self._on_chunk)
+        except PermissionError as e:
+            logger.error("권한 오류: %s", e)
+            self._notify(
+                "Whisper Ko",
+                "화면 녹화 권한 필요",
+                "시스템 설정 > 개인정보 보호 및 보안 > 화면 녹화에서 허용해주세요.",
+            )
+            # System Settings 열기
+            try:
+                subprocess.Popen([
+                    "open",
+                    "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+                ])
+            except Exception:
+                pass
+            return
         except Exception as e:
             logger.error("오디오 오류: %s", e)
             return
