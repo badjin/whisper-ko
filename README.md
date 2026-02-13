@@ -10,14 +10,44 @@ Apple Silicon Mac 전용 **음성 받아쓰기** + **실시간 영한 번역** �
 - **번역 모드**: 시스템 오디오(영어) → 실시간 한국어 자막 오버레이
 - **Apple Notes 연동**: 번역 종료 시 영어/한글 정리 노트 자동 생성
 - **메뉴바 앱**: 백그라운드에서 조용히 실행
-- **BlackHole 불필요**: ScreenCaptureKit으로 시스템 오디오 직접 캡처 — 출력 장치(AirPods, 스피커 등)와 무관하게 동작
 
 ## 필수 조건
 
 - **Apple Silicon Mac** (M1/M2/M3/M4) — MLX는 Apple Silicon만 지원
 - **macOS 13+** (Ventura 이상)
-- **Xcode Command Line Tools** — Swift 컴파일에 필요 (`xcode-select --install`)
-- **Google Cloud Translation API 키** — 번역 모드에 필요
+- **Xcode Command Line Tools** — Swift 컴파일에 필요
+- **Google Cloud Translation API 키** — 번역 모드에 필요 (받아쓰기 전용이면 불필요)
+
+### Xcode Command Line Tools 설치
+
+터미널에서 실행:
+
+```bash
+xcode-select --install
+```
+
+팝업이 나타나면 "설치"를 클릭하세요. 이미 설치되어 있으면 무시해도 됩니다.
+
+### Google Cloud Translation API 키 발급
+
+번역 모드를 사용하려면 Google Cloud Translation API 키가 필요합니다. 받아쓰기만 사용할 경우 이 단계를 건너뛰세요.
+
+1. [Google Cloud Console](https://console.cloud.google.com/)에 로그인
+2. 새 프로젝트 생성 (또는 기존 프로젝트 선택)
+3. **API 및 서비스 → 라이브러리**에서 "Cloud Translation API" 검색 → **사용 설정**
+4. **API 및 서비스 → 사용자 인증 정보 → 사용자 인증 정보 만들기 → API 키** 클릭
+5. 생성된 API 키를 복사
+
+설치 스크립트 실행 시 API 키 입력을 안내합니다. 나중에 수동으로 설정하려면:
+
+```bash
+# 설정 파일 직접 편집
+nano ~/.config/whisper-ko/config.json
+```
+
+`"google_translate_api_key"` 값에 발급받은 키를 입력하세요.
+
+> **비용 안내**: Google Cloud Translation API는 월 50만 자까지 무료입니다. 일반적인 사용에서는 무료 한도를 초과하기 어렵습니다. 자세한 내용은 [가격 정책](https://cloud.google.com/translate/pricing)을 참고하세요.
 
 ## 설치
 
