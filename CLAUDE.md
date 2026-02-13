@@ -23,6 +23,7 @@ whisper-ko/
 │   ├── mic.py            # 마이크 녹음 (Mode 1)
 │   ├── system.py         # ScreenCaptureKit 시스템 오디오 캡처 + 청크 분할 (Mode 2)
 │   └── sck_capture.swift # Swift CLI — ScreenCaptureKit → stdout PCM
+├── install.sh            # 원클릭 설치 스크립트
 ├── transcribe.py         # MLX Whisper 래퍼
 ├── translate.py          # Google Cloud Translation API v2 (requests)
 ├── output/
@@ -82,15 +83,29 @@ whisper-ko/
 
 - `temp-analysis/app.py` - 원본 borinomi/mlx-whisper 앱 (받아쓰기 전용, 단일 파일)
 
-## 의존성 설치
+## 설치 (install.sh)
 
-```bash
-pip install -r requirements.txt
-```
+`install.sh`는 다음을 순서대로 수행:
+
+1. Apple Silicon 확인
+2. Xcode Command Line Tools 확인 (없으면 설치 안내 후 종료)
+3. Homebrew / PortAudio 설치
+4. Python 3.10+ 확인/설치
+5. Git clone 또는 pull
+6. venv 생성 + `pip install -r requirements.txt`
+7. Swift 오디오 캡처 바이너리 컴파일 (`audio/sck_capture`)
+8. Whisper 모델 다운로드 (~1.5GB)
+9. `.app` 번들 생성 (shell script launcher + Info.plist + codesign)
+10. `/Applications` 심볼릭 링크
+11. Google Translate API 키 입력 (선택)
 
 ## 실행
 
 ```bash
+# .app 번들로 실행
+open dist/Whisper\ Ko.app
+
+# 또는 직접 실행 (개발 시)
 python app.py
 ```
 
