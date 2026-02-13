@@ -163,5 +163,6 @@ def build_menu(app: WhisperKoApp) -> None:
 
     menu.add(rumps.separator)
 
-    # ── Quit ────────────────────────────────────────────
+    # ── Restart / Quit ────────────────────────────────────
+    menu.add(rumps.MenuItem("Restart", callback=app.restart_app))
     menu.add(rumps.MenuItem("Quit", callback=app.quit_app))

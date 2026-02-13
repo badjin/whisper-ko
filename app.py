@@ -10,13 +10,12 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import subprocess
+import sys
 import threading
-import time
 import traceback
 
 import AppKit
-import pyautogui
-import pyperclip
 import rumps
 
 # ── Dock 아이콘 숨기기 ──────────────────────────────────────────
@@ -32,7 +31,7 @@ from audio.devices import find_blackhole_device
 from audio.system import SystemAudioCapture
 from transcribe import transcribe, preload_model
 from translate import translate_text
-from output.clipboard import copy_and_paste
+from output.clipboard import copy_and_paste, paste_and_enter
 from output.logfile import TranslationLogger
 from output.overlay import SubtitleOverlay
 from hotkeys import HotkeyManager, format_hotkey
@@ -270,21 +269,9 @@ class WhisperKoApp(rumps.App):
             text = result.get("text", "")
 
             if text:
-                # 원본 borinomi 패턴: 클립보드 복사는 bg 스레드,
-                # 붙여넣기(Cmd+V)는 딜레이 후 메인 루프
-                pyperclip.copy(text)
-
-                def do_paste():
-                    try:
-                        pyautogui.hotkey("command", "v")
-                        time.sleep(0.05)
-                        pyautogui.press("enter")
-                    except Exception as e:
-                        import sys
-                        print(f"붙여넣기 오류: {e}", file=sys.stderr)
-
-                time.sleep(0.15)
-                self._ui(do_paste)
+                # modifier 키 릴리즈 + 명시적 keyDown/keyUp으로 Cmd+V 수행
+                # (push-to-talk 핫키 modifier 잔류 간섭 방지)
+                self._ui(lambda: paste_and_enter(text))
             else:
                 logger.info("인식된 텍스트가 없습니다.")
 
@@ -560,6 +547,42 @@ class WhisperKoApp(rumps.App):
     # 종료
     # ══════════════════════════════════════════════════════
 
+    def restart_app(self, sender) -> None:
+        """앱을 재시작한다. 현재 프로세스를 종료하고 동일 명령으로 재실행."""
+        # 현재 실행 명령어 보존
+        exe = sys.executable
+        args = sys.argv
+
+        # 리소스 정리 (quit_app과 동일)
+        try:
+            self._hotkey_mgr.stop()
+        except Exception:
+            pass
+        try:
+            self._ui_timer.stop()
+        except Exception:
+            pass
+        try:
+            if self._recorder.is_recording:
+                self._recorder.stop()
+        except Exception:
+            pass
+        try:
+            if self._sys_capture and self._sys_capture.is_capturing:
+                self._sys_capture.stop()
+        except Exception:
+            pass
+        try:
+            self._overlay.destroy()
+        except Exception:
+            pass
+
+        rumps.quit_application()
+
+        # 새 프로세스로 재시작 후 현재 프로세스 종료
+        subprocess.Popen([exe] + args)
+        os._exit(0)
+
     def quit_app(self, sender) -> None:
         """앱을 안전하게 종료한다."""
         # 핫키 리스너 중지
@@ -595,6 +618,10 @@ class WhisperKoApp(rumps.App):
             pass
 
         rumps.quit_application()
+
+        # rumps.quit_application() 이후에도 pynput 리스너 등
+        # non-daemon 스레드가 남아 프로세스가 종료되지 않는 문제 방지
+        os._exit(0)
 
 
 # ── 엔트리 포인트 ────────────────────────────────────────────
