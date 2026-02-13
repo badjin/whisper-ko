@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 
 import mlx_whisper
@@ -19,6 +20,30 @@ DEFAULT_MODEL = "mlx-community/whisper-large-v3-turbo"
 
 # 모델 프리로드 상태
 _preload_done = threading.Event()
+
+# ── Whisper hallucination 필터 ────────────────────────────────
+# 무음/저음량 구간에서 Whisper가 반복 생성하는 환각 패턴
+_HALLUCINATION_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^(감사합니다\.?\s*)+$"),
+    re.compile(r"^(thank\s*you\.?\s*)+$", re.IGNORECASE),
+    re.compile(r"^(thanks?\s*(for\s+watching)?\.?\s*)+$", re.IGNORECASE),
+    re.compile(r"^(please\s+subscribe\.?\s*)+$", re.IGNORECASE),
+    re.compile(r"^(구독과\s*좋아요.*)+$"),
+    re.compile(r"^(시청해\s*주셔서\s*감사합니다\.?\s*)+$"),
+    re.compile(r"^(좋아요.*구독.*)+$"),
+    re.compile(r"^[\s.…。,，!！?？]+$"),  # 구두점만
+]
+
+
+def _is_hallucination(text: str) -> bool:
+    """Whisper hallucination 패턴인지 확인한다."""
+    text = text.strip()
+    if not text:
+        return True
+    for pattern in _HALLUCINATION_PATTERNS:
+        if pattern.match(text):
+            return True
+    return False
 
 
 def preload_model(model: str = DEFAULT_MODEL) -> None:
@@ -64,6 +89,14 @@ def transcribe(
     try:
         kwargs: dict = {
             "path_or_hf_repo": model,
+            # hallucination 억제: 이전 텍스트 컨텍스트 전파 차단
+            "condition_on_previous_text": False,
+            # 무음 구간 hallucination 감지 (초 단위)
+            "hallucination_silence_threshold": 0.5,
+            # no_speech 확률이 높으면 텍스트 무시 (기본 0.6 → 더 엄격)
+            "no_speech_threshold": 0.4,
+            # 압축 비율 임계값 (반복 텍스트 감지)
+            "compression_ratio_threshold": 2.0,
         }
         if language is not None:
             kwargs["language"] = language
@@ -72,6 +105,11 @@ def transcribe(
 
         text = (result.get("text") or "").strip()
         detected_language = result.get("language", language or "unknown")
+
+        # hallucination 필터링
+        if _is_hallucination(text):
+            logger.debug("Hallucination 필터됨: %r", text)
+            text = ""
 
         return {
             "text": text,
@@ -84,3 +122,11 @@ def transcribe(
             "text": "",
             "language": language or "unknown",
         }
+
+    finally:
+        # MLX GPU 메모리 캐시 해제 (전사마다 누적되는 것 방지)
+        try:
+            import mlx.core as mx
+            mx.metal.clear_cache()
+        except Exception:
+            pass

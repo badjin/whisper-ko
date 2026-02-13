@@ -234,7 +234,8 @@ class SystemAudioCapture:
                 should_split = True
 
             if should_split:
-                self._flush_chunk(frames)
+                if has_audio:
+                    self._flush_chunk(frames)
                 frames = []
                 frame_count = 0
                 silent_frames = 0

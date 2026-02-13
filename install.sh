@@ -129,6 +129,7 @@ cat > "$MACOS_DIR/whisper-ko" << LAUNCHER
 #!/bin/bash
 PROJECT="$INSTALL_DIR"
 VENV="\${PROJECT}/.venv/bin/python3"
+export PATH="/opt/homebrew/bin:/usr/local/bin:\${PATH}"
 cd "\${PROJECT}"
 exec arch -arm64 "\${VENV}" "\${PROJECT}/app.py" 2>/tmp/whisper-ko-stderr.log
 LAUNCHER
