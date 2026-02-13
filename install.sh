@@ -38,6 +38,18 @@ if [ "$ARCH" != "arm64" ]; then
 fi
 ok "Apple Silicon detected"
 
+# Check Xcode Command Line Tools (required for Swift compilation)
+if ! command -v swiftc &>/dev/null; then
+    warn "Xcode Command Line Tools not found"
+    info "Installing Xcode Command Line Tools..."
+    xcode-select --install 2>/dev/null || true
+    echo ""
+    echo -e "${YELLOW}Please complete the Xcode Command Line Tools installation popup,${NC}"
+    echo -e "${YELLOW}then re-run this script.${NC}"
+    exit 1
+fi
+ok "Xcode Command Line Tools ready"
+
 # ─── 2. Check/Install Homebrew ──────────────────────────
 if ! command -v brew &>/dev/null; then
     info "Installing Homebrew..."
@@ -263,8 +275,8 @@ echo "  Launch:  open \"$APP_DIR\""
 echo "  Or find 'Whisper Ko' in /Applications"
 echo ""
 echo "  Hotkeys:"
-echo "    Ctrl+Shift+A  →  Start/Stop Dictation"
-echo "    Ctrl+Shift+S  →  Start/Stop Translation"
+echo "    Ctrl+Shift+A (hold)  →  Dictation (Push-to-Talk)"
+echo "    Ctrl+Shift+S         →  Start/Stop Translation"
 echo ""
 echo "  ⚠️  First launch: Grant required permissions"
 echo "      System Settings > Privacy & Security > Accessibility"
