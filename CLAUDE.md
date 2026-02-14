@@ -6,9 +6,8 @@ macOS 메뉴바 음성인식 앱. 원본 `borinomi/mlx-whisper`를 확장하여 
 
 - **Mode 1 (받아쓰기)**: 마이크 → MLX Whisper → 한국어 텍스트 → 커서 위치에 Cmd+V 붙여넣기
 - **Mode 2 (번역)**: 시스템 오디오(ScreenCaptureKit) → Whisper → Google Cloud Translate → `[timestamp] 영어 - 한글` 출력
-- **Jarvis Mode (음성 트리거 받아쓰기)**: 웨이크 워드("자비스") → 녹음 → 종료 워드("끝") → 전사 → 붙여넣기
 
-세 모드는 상호배제 (GPU 경합 방지). Jarvis와 PTT는 자동 전환 (PTT 사용 시 Jarvis 일시중지 → PTT 완료 후 복원).
+두 모드는 상호배제 (GPU 경합 방지).
 
 ## 프로젝트 구조
 
@@ -17,15 +16,16 @@ whisper-ko/
 ├── app.py                # 메인 rumps 앱, 모드 관리, UI 큐
 ├── config.py             # 설정 로드/저장 (~/.config/whisper-ko/config.json)
 ├── hotkeys.py            # 글로벌 핫키 매니저 (pynput)
-├── jarvis.py             # Jarvis Mode 컨트롤러 (음성 트리거 상태 머신)
 ├── menu.py               # rumps 메뉴 빌더
 ├── audio/
 │   ├── __init__.py
 │   ├── devices.py        # PyAudio 디바이스 열거
-│   ├── mic.py            # 마이크 녹음 (Mode 1)
+│   ├── mic.py            # 마이크 녹음 + 오디오 레벨 콜백 (Mode 1)
 │   ├── system.py         # ScreenCaptureKit 시스템 오디오 캡처 + 청크 분할 (Mode 2)
-│   ├── vad.py            # 음성 활동 감지 (Jarvis Mode용)
 │   └── sck_capture.swift # Swift CLI — ScreenCaptureKit → stdout PCM
+├── widget/
+│   ├── __init__.py
+│   └── pill.py           # 받아쓰기 상태 Pill 위젯 (이퀄라이저 + 상태 아이콘)
 ├── install.sh            # 원클릭 설치 스크립트
 ├── transcribe.py         # MLX Whisper 래퍼
 ├── translate.py          # Google Cloud Translation API v2 (requests)
@@ -55,8 +55,7 @@ whisper-ko/
 | 번역 API | requests + REST v2 | google-cloud-translate는 의존성 50+개, API키 인증엔 requests 충분 |
 | 오버레이 | PyObjC (AppKit) | rumps가 이미 NSApplication 사용, 별도 이벤트루프 충돌 방지 |
 | 스레딩 | 청크 → 단일 워커 스레드 | Whisper가 병목, 순차 처리가 GPU 안정적 |
-| Jarvis VAD | RMS dB + SilenceDetector | 웨이크/종료 워드 감지용 세그먼트 분할, system.py와 동일 패턴 |
-| Jarvis 스레딩 | Event.wait() 블로킹 | GPU 순차 접근 보장, PTT와 상호배제 |
+| Pill 위젯 | PyObjC (Core Graphics) | 이퀄라이저 바를 실시간 드로잉, 앱 시작 시 항상 표시 |
 
 ## 설정 파일
 
@@ -66,21 +65,11 @@ whisper-ko/
 {
   "dictation_hotkey": "ctrl+shift+a",
   "translation_hotkey": "ctrl+shift+s",
-  "jarvis_hotkey": "ctrl+shift+j",
   "model": "mlx-community/whisper-large-v3-turbo",
   "translation_output": "overlay",
   "google_translate_api_key": "",
   "overlay": { "font_size": 28, "max_lines": 4, "fade_seconds": 10, "opacity": 0.85 },
   "audio": { "silence_threshold_db": -40, "silence_duration_sec": 0.8, "max_chunk_sec": 8 },
-  "jarvis": {
-    "wake_word": "자비스",
-    "end_word": "끝",
-    "silence_threshold_db": -40,
-    "silence_duration_sec": 1.5,
-    "end_silence_duration_sec": 2.0,
-    "max_listen_sec": 8,
-    "max_record_sec": 60
-  },
   "log_dir": "~/Documents/whisper-ko-logs"
 }
 ```

@@ -35,7 +35,6 @@ from output.logfile import TranslationLogger
 from output.overlay import SubtitleOverlay
 from hotkeys import HotkeyManager, format_hotkey
 from menu import build_menu
-from jarvis import JarvisListener, JarvisState
 from widget.pill import PillWidget
 
 logger = logging.getLogger(__name__)
@@ -80,31 +79,16 @@ class WhisperKoApp(rumps.App):
         self.is_translating: bool = False
         self._last_translation: str = ""  # 중복 감지용
         self._translation_pairs: list[tuple[str, str]] = []  # 세션 누적 (Notes용)
-        self.is_jarvis_active: bool = False
-        self._jarvis_was_active: bool = False  # PTT 상호배제 복원용
+
+        # ── Pill 위젯 (받아쓰기 상태 표시) ─────────────
+        self._pill = PillWidget(
+            on_close=None,
+            on_stop=lambda: self._ui(self._stop_dictation),
+        )
 
         # ── 오디오 (Mode 1: 마이크) ──────────────────────
-        self._recorder = MicRecorder()
-
-        # ── Jarvis Mode ──────────────────────────────────
-        jarvis_cfg = self.cfg.get("jarvis", {})
-        self._jarvis = JarvisListener(
-            wake_word=jarvis_cfg.get("wake_word", "자비스"),
-            end_word=jarvis_cfg.get("end_word", "끝"),
-            silence_threshold_db=jarvis_cfg.get("silence_threshold_db", -35),
-            silence_duration_sec=jarvis_cfg.get("silence_duration_sec", 0.5),
-            end_silence_duration_sec=jarvis_cfg.get("end_silence_duration_sec", 0.6),
-            max_listen_sec=jarvis_cfg.get("max_listen_sec", 4),
-            max_record_sec=jarvis_cfg.get("max_record_sec", 60),
-        )
-        self._jarvis.on_state_change = self._on_jarvis_state_change
-        self._jarvis.on_transcribe_request = self._on_jarvis_transcribe_request
-        self._jarvis.on_audio_level = lambda db: self._pill.set_audio_level(db)
-
-        # ── Pill 위젯 (Jarvis 상태 표시) ─────────────────
-        self._pill = PillWidget(
-            on_close=lambda: self._ui(self._stop_jarvis),
-            on_stop=lambda: self._ui(lambda: self._jarvis.cancel_recording()),
+        self._recorder = MicRecorder(
+            on_audio_level=lambda db: self._pill.set_audio_level(db),
         )
 
         # ── 오디오 (Mode 2: 시스템 오디오) ────────────────
@@ -123,7 +107,6 @@ class WhisperKoApp(rumps.App):
         self._dictation_start_event = threading.Event()
         self._dictation_stop_event = threading.Event()
         self._translation_event = threading.Event()
-        self._jarvis_toggle_event = threading.Event()
 
         # ── 타이머: UI 큐 drain + 이벤트 처리 (50ms) ────
         self._ui_timer = rumps.Timer(self._drain_mainloop, 0.05)
@@ -136,6 +119,9 @@ class WhisperKoApp(rumps.App):
 
         # ── 메뉴 구성 ───────────────────────────────────
         build_menu(self)
+
+        # ── Pill 위젯 표시 (앱 시작 시 항상 보임) ────────
+        self._pill.set_state("listening")
 
     # ══════════════════════════════════════════════════════
     # UI 큐 (메인 스레드 전용)
@@ -171,10 +157,6 @@ class WhisperKoApp(rumps.App):
             self._translation_event.clear()
             self.toggle_translation(None)
 
-        if self._jarvis_toggle_event.is_set():
-            self._jarvis_toggle_event.clear()
-            self._toggle_jarvis()
-
         # 2) UI 큐 drain (한 tick에 최대 50개)
         for _ in range(50):
             try:
@@ -201,9 +183,6 @@ class WhisperKoApp(rumps.App):
 
         translation_hk = self.cfg.get("translation_hotkey", "ctrl+shift+t")
         self._hotkey_mgr.register(translation_hk, self._translation_event.set)
-
-        jarvis_hk = self.cfg.get("jarvis_hotkey", "ctrl+shift+j")
-        self._hotkey_mgr.register(jarvis_hk, self._jarvis_toggle_event.set)
 
     def _rebind_hotkeys(self) -> None:
         """핫키를 재등록한다 (단축키 변경 시)."""
@@ -232,11 +211,6 @@ class WhisperKoApp(rumps.App):
         if self.is_translating:
             self._stop_translation()
 
-        # 모드 상호배제: Jarvis 활성 중이면 일시 중지
-        if self._jarvis.is_active:
-            self._jarvis_was_active = True
-            self._jarvis.stop()
-
         try:
             self._recorder.start()
         except OSError as e:
@@ -248,6 +222,7 @@ class WhisperKoApp(rumps.App):
 
         self.is_dictating = True
         self.title = ICON_DICTATING
+        self._pill.set_state("recording")
         build_menu(self)
 
     def _stop_dictation(self) -> None:
@@ -257,6 +232,7 @@ class WhisperKoApp(rumps.App):
 
         self.is_dictating = False
         self.title = ICON_PROCESSING
+        self._pill.set_state("transcribing")
         build_menu(self)
 
         # MicRecorder.stop()은 스레드 join + WAV 저장까지 수행
@@ -264,6 +240,7 @@ class WhisperKoApp(rumps.App):
 
         if not wav_path:
             self.title = ICON_IDLE
+            self._pill.set_state("listening")
             build_menu(self)
             return
 
@@ -301,16 +278,13 @@ class WhisperKoApp(rumps.App):
             except Exception:
                 pass
 
-            # UI 아이콘 복귀 (번역 모드로 전환된 경우 덮어쓰지 않음)
-            def _restore_idle():
+            # UI 복귀: pill → listening (대기), 메뉴바 아이콘 → idle
+            def _restore():
                 if not self.is_translating and not self.is_dictating:
                     self.title = ICON_IDLE
+                    self._pill.set_state("listening")
                     build_menu(self)
-                    # PTT 완료 후 Jarvis 복원
-                    if self._jarvis_was_active:
-                        self._jarvis_was_active = False
-                        self._jarvis.start()
-            self._ui(_restore_idle)
+            self._ui(_restore)
 
     # ══════════════════════════════════════════════════════
     # Mode 2: 번역
@@ -331,9 +305,6 @@ class WhisperKoApp(rumps.App):
         # 모드 상호배제: 받아쓰기 중이면 중지
         if self.is_dictating:
             self._stop_dictation()
-
-        if self._jarvis.is_active:
-            self._stop_jarvis()
 
         # API 키 확인 — 없으면 설정 다이얼로그 자동 표시
         api_key = self.cfg.get("google_translate_api_key", "")
@@ -522,140 +493,6 @@ class WhisperKoApp(rumps.App):
                 pass
 
     # ══════════════════════════════════════════════════════
-    # Jarvis Mode
-    # ══════════════════════════════════════════════════════
-
-    def _toggle_jarvis(self) -> None:
-        """Jarvis 모드를 ON/OFF 토글한다."""
-        if self._jarvis.is_active:
-            self._stop_jarvis()
-        else:
-            self._start_jarvis()
-
-    def _start_jarvis(self) -> None:
-        """Jarvis 모드를 시작한다."""
-        # 모드 상호배제
-        if self.is_dictating:
-            self._stop_dictation()
-        if self.is_translating:
-            self._stop_translation()
-
-        self.is_jarvis_active = True
-        self._jarvis.start()
-        build_menu(self)
-
-    def _stop_jarvis(self) -> None:
-        """Jarvis 모드를 중지한다."""
-        self._jarvis.stop()
-        self.is_jarvis_active = False
-        self._pill.set_state("idle")
-        self.title = ICON_IDLE
-        build_menu(self)
-
-    def _on_jarvis_state_change(self, state: JarvisState) -> None:
-        """Jarvis 상태 변경 콜백 (Jarvis 스레드에서 호출).
-
-        Jarvis 상태는 pill 위젯으로만 표시하고, 메뉴바 아이콘은 변경하지 않는다.
-        """
-        def _update():
-            if state == JarvisState.LISTENING:
-                self._pill.set_state("listening")
-            elif state == JarvisState.CHECKING:
-                self._pill.set_state("checking")
-            elif state == JarvisState.RECORDING:
-                self._pill.set_state("recording")
-            elif state == JarvisState.TRANSCRIBING:
-                self._pill.set_state("transcribing")
-            elif state == JarvisState.INACTIVE:
-                self.is_jarvis_active = False
-                self._pill.set_state("idle")
-            build_menu(self)
-        self._ui(_update)
-
-    def _on_jarvis_transcribe_request(self, wav_path: str, is_wake_check: bool) -> None:
-        """Jarvis 전사 요청 콜백 (Jarvis 스레드에서 호출)."""
-        threading.Thread(
-            target=self._jarvis_transcribe_worker,
-            args=(wav_path, is_wake_check),
-            daemon=True,
-        ).start()
-
-    def _jarvis_transcribe_worker(self, wav_path: str, is_wake_check: bool) -> None:
-        """Jarvis용 Whisper 워커 (백그라운드 스레드)."""
-        try:
-            model = self.cfg.get("model", "mlx-community/whisper-large-v3-turbo")
-            if is_wake_check:
-                # 웨이크/종료 워드 체크: 환각 필터 건너뜀, raw 모드
-                # 웨이크: language=None + initial_prompt="자비스" (영어 인식도 허용)
-                # 종료: language="ko" (한국어 확실)
-                jarvis_cfg = self.cfg.get("jarvis", {})
-                is_end_check = (self._jarvis.state == JarvisState.RECORDING)
-                if is_end_check:
-                    end = jarvis_cfg.get("end_word", "완료")
-                    result = transcribe(
-                        wav_path, model=model, language="ko", raw=True,
-                        initial_prompt=end,
-                    )
-                else:
-                    wake = jarvis_cfg.get("wake_word", "위스퍼")
-                    result = transcribe(
-                        wav_path, model=model, language=None, raw=True,
-                        initial_prompt=wake,
-                    )
-            else:
-                result = transcribe(wav_path, model=model, language="ko")
-            text = result.get("text", "")
-
-            if is_wake_check:
-                self._jarvis.on_wake_check_result(text)
-            else:
-                # 전체 전사 결과 → 웨이크/종료 워드 제거 후 붙여넣기
-                cleaned = self._strip_jarvis_words(text)
-                logger.info("Jarvis 전사 결과: %r → cleaned: %r", text, cleaned)
-                if cleaned:
-                    self._ui(lambda: paste_and_enter(cleaned))
-                else:
-                    logger.warning("Jarvis 전사 결과가 비어있음 (원문: %r)", text)
-                self._jarvis.on_transcribe_result(text)
-
-        except Exception:
-            logger.exception("Jarvis 전사 오류")
-            if is_wake_check:
-                self._jarvis.on_wake_check_result("")
-            else:
-                self._jarvis.on_transcribe_result("")
-        finally:
-            try:
-                os.unlink(wav_path)
-            except Exception:
-                pass
-
-    def _strip_jarvis_words(self, text: str) -> str:
-        """전사 결과에서 웨이크 워드(앞부분)와 종료 워드(뒷부분)를 제거한다."""
-        import re
-        jarvis_cfg = self.cfg.get("jarvis", {})
-        wake = jarvis_cfg.get("wake_word", "위스퍼")
-        end = jarvis_cfg.get("end_word", "완료")
-        result = text
-
-        # ── 앞부분: 웨이크 워드 제거 ──
-        result = re.sub(r"^[\s]*(?:헤이|hey|hi)\s*", "", result, flags=re.IGNORECASE)
-        result = re.sub(r"^[\s]*" + re.escape(wake) + r"[\s,.!?]*", "", result, flags=re.IGNORECASE)
-        # 영어 변형 (Whisper가 영어로 인식한 경우)
-        result = re.sub(r"^[\s]*(?:whisper|wisper)\s*", "", result, flags=re.IGNORECASE)
-
-        # ── 뒷부분: 종료 워드 제거 ──
-        result = re.sub(r"[\s,.!?]*" + re.escape(end) + r"[\s,.!?]*$", "", result)
-        # 종료 워드 이후 잔여 텍스트 제거
-        idx = result.rfind(end)
-        if idx >= 0 and idx > len(result) * 0.6:
-            result = result[:idx]
-
-        # 정리
-        result = re.sub(r"\s+", " ", result)
-        return result.strip()
-
-    # ══════════════════════════════════════════════════════
     # 설정 변경 (메뉴 콜백)
     # ══════════════════════════════════════════════════════
 
@@ -669,13 +506,6 @@ class WhisperKoApp(rumps.App):
     def set_translation_hotkey(self, hotkey: str) -> None:
         """번역 단축키를 변경하고 저장한다."""
         self.cfg["translation_hotkey"] = hotkey
-        save_config(self.cfg)
-        self._rebind_hotkeys()
-        build_menu(self)
-
-    def set_jarvis_hotkey(self, hotkey: str) -> None:
-        """Jarvis 단축키를 변경하고 저장한다."""
-        self.cfg["jarvis_hotkey"] = hotkey
         save_config(self.cfg)
         self._rebind_hotkeys()
         build_menu(self)
@@ -748,11 +578,6 @@ class WhisperKoApp(rumps.App):
         except Exception:
             pass
         try:
-            if self._jarvis.is_active:
-                self._jarvis.stop()
-        except Exception:
-            pass
-        try:
             self._pill.destroy()
         except Exception:
             pass
@@ -792,13 +617,6 @@ class WhisperKoApp(rumps.App):
         try:
             if self._sys_capture and self._sys_capture.is_capturing:
                 self._sys_capture.stop()
-        except Exception:
-            pass
-
-        # Jarvis 중지
-        try:
-            if self._jarvis.is_active:
-                self._jarvis.stop()
         except Exception:
             pass
 

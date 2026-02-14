@@ -31,6 +31,7 @@ _HALLUCINATION_PATTERNS: list[re.Pattern] = [
     re.compile(r"^(구독과\s*좋아요.*)+$"),
     re.compile(r"^(시청해\s*주셔서\s*감사합니다\.?\s*)+$"),
     re.compile(r"^(좋아요.*구독.*)+$"),
+    re.compile(r"^(다음\s*영상에서\s*만나요.*)+$"),
     re.compile(r"^[\s.…。,，!！?？]+$"),  # 구두점만
 ]
 

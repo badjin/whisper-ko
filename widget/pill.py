@@ -1,15 +1,14 @@
-"""Jarvis 상태 표시 Pill 위젯.
+"""받아쓰기 상태 표시 Pill 위젯.
 
 레이아웃: [X 버튼] [이퀄라이저 바] [■ 상태 아이콘]
 
-- listening: 바 정적 (흰색 짧은 바), 오른쪽 핑크 ■
-- checking: 바 로딩 웨이브, 오른쪽 핑크 ■
-- recording: 바 이퀄라이저 (오디오 레벨 반영), 오른쪽 핑크 ■
-- transcribing: 바 로딩 웨이브, 오른쪽 파란 ⋯
+- listening: 바 정적 (흰색 짧은 바) — 대기 상태 (앱 시작 시 항상 표시)
+- recording: 바 이퀄라이저 (오디오 레벨 반영), 오른쪽 핑크 ■ — 받아쓰기 녹음 중
+- transcribing: 바 로딩 웨이브, 오른쪽 파란 ⋯ — Whisper 전사 중
 - idle: 숨김
 
 모든 메서드는 메인 스레드에서 호출해야 한다 (app._ui() 큐 통해).
-set_audio_level()만 예외: Jarvis 스레드에서 호출 가능 (float 대입은 원자적).
+set_audio_level()만 예외: 녹음 스레드에서 호출 가능 (float 대입은 원자적).
 """
 
 from __future__ import annotations
@@ -162,7 +161,7 @@ class _ButtonTarget(AppKit.NSObject):
 
 
 class PillWidget:
-    """Jarvis 상태 표시 Pill 위젯."""
+    """받아쓰기 상태 표시 Pill 위젯."""
 
     def __init__(
         self,
@@ -323,7 +322,7 @@ class PillWidget:
             self._start_animation(interval=0.05)
 
     def set_audio_level(self, db: float) -> None:
-        """오디오 레벨 (Jarvis 스레드에서 호출 가능)."""
+        """오디오 레벨 (녹음 스레드에서 호출 가능)."""
         self._audio_level = db
 
     def destroy(self) -> None:

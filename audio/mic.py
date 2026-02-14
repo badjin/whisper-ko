@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import math
+import struct
 import tempfile
 import threading
 import wave
-from typing import Optional
+from typing import Callable, Optional
 
 import pyaudio
+
+
+def compute_rms_db(data: bytes) -> float:
+    """PCM16 오디오 데이터의 RMS 에너지를 dB로 변환한다."""
+    n = len(data) // 2
+    if n == 0:
+        return -100.0
+    samples = struct.unpack(f"<{n}h", data)
+    ms = sum(s * s for s in samples) / n
+    if ms <= 0:
+        return -100.0
+    return 10 * math.log10(ms / (32768 * 32768))
 
 # 오디오 포맷 상수
 FORMAT = pyaudio.paInt16
@@ -33,11 +47,13 @@ class MicRecorder:
         channels: int = CHANNELS,
         chunk: int = CHUNK,
         device_index: Optional[int] = None,
+        on_audio_level: Optional[Callable[[float], None]] = None,
     ) -> None:
         self._rate = rate
         self._channels = channels
         self._chunk = chunk
         self._device_index = device_index
+        self.on_audio_level = on_audio_level
 
         self._recording = False
         self._frames: list[bytes] = []
@@ -125,6 +141,11 @@ class MicRecorder:
             try:
                 data = self._stream.read(self._chunk, exception_on_overflow=False)
                 self._frames.append(data)
+                if self.on_audio_level is not None:
+                    try:
+                        self.on_audio_level(compute_rms_db(data))
+                    except Exception:
+                        pass
             except Exception:
                 # 스트림 에러 시 녹음 중단
                 self._recording = False
