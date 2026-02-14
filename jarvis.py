@@ -309,8 +309,14 @@ class JarvisListener:
             if detector.feed(data):
                 if detector.has_audio:
                     frames = detector.get_frames()
-                    logger.debug("음성 세그먼트: %d프레임 (%.1f초)", len(frames), len(frames) * CHUNK / RATE)
-                    wav_path = self._save_wav(frames)
+                    duration = len(frames) * CHUNK / RATE
+                    logger.debug("음성 세그먼트: %d프레임 (%.1f초)", len(frames), duration)
+                    # 0.8초 미만 세그먼트는 무시 (Whisper 환각 방지)
+                    if duration < 0.8:
+                        logger.debug("세그먼트 너무 짧음, 무시")
+                        detector.reset()
+                        continue
+                    wav_path = self._save_wav(frames, trim=True)
                     if wav_path:
                         self._set_state(JarvisState.CHECKING)
                         self._pending_wav = wav_path
@@ -419,7 +425,7 @@ class JarvisListener:
             if end_detector.feed(data):
                 if end_detector.has_audio:
                     segment_frames = end_detector.get_frames()
-                    wav_path = self._save_wav(segment_frames)
+                    wav_path = self._save_wav(segment_frames, trim=True)
                     if wav_path:
                         self._whisper_event.clear()
                         self._whisper_result = ""
@@ -481,9 +487,25 @@ class JarvisListener:
 
     # ── WAV 저장 ──────────────────────────────────────────
 
-    def _save_wav(self, frames: list[bytes]) -> Optional[str]:
+    @staticmethod
+    def _trim_silence(frames: list[bytes], threshold_db: float = -40) -> list[bytes]:
+        """끝부분 무음 프레임을 제거하여 Whisper 추론 시간을 단축한다."""
+        if not frames:
+            return frames
+        # 뒤에서부터 무음 프레임 제거 (최소 2프레임은 유지)
+        end = len(frames)
+        while end > 2:
+            if compute_rms_db(frames[end - 1]) < threshold_db:
+                end -= 1
+            else:
+                break
+        return frames[:end]
+
+    def _save_wav(self, frames: list[bytes], trim: bool = False) -> Optional[str]:
         if not frames:
             return None
+        if trim:
+            frames = self._trim_silence(frames, self._silence_threshold_db)
         try:
             fd, path = tempfile.mkstemp(suffix=".wav", prefix="jarvis-")
             os.close(fd)

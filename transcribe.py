@@ -96,7 +96,7 @@ def transcribe(
         }
 
         if raw:
-            # raw 모드: 웨이크 워드 체크용 — 최대한 관대하게
+            # raw 모드: 웨이크/종료 워드 체크용 — 최대한 관대하게
             kwargs["no_speech_threshold"] = 0.8
             kwargs["compression_ratio_threshold"] = 3.0
         else:
