@@ -43,9 +43,7 @@ logger = logging.getLogger(__name__)
 
 ICON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo_192.png")
 ICON_IDLE = ""
-ICON_DICTATING = "🔴"
 ICON_TRANSLATING = "🔵"
-ICON_PROCESSING = "⏳"
 
 
 class WhisperKoApp(rumps.App):
@@ -221,7 +219,6 @@ class WhisperKoApp(rumps.App):
             return
 
         self.is_dictating = True
-        self.title = ICON_DICTATING
         self._pill.set_state("recording")
         build_menu(self)
 
@@ -231,7 +228,6 @@ class WhisperKoApp(rumps.App):
             return
 
         self.is_dictating = False
-        self.title = ICON_PROCESSING
         self._pill.set_state("transcribing")
         build_menu(self)
 
@@ -239,7 +235,6 @@ class WhisperKoApp(rumps.App):
         wav_path = self._recorder.stop()
 
         if not wav_path:
-            self.title = ICON_IDLE
             self._pill.set_state("listening")
             build_menu(self)
             return
@@ -278,10 +273,9 @@ class WhisperKoApp(rumps.App):
             except Exception:
                 pass
 
-            # UI 복귀: pill → listening (대기), 메뉴바 아이콘 → idle
+            # UI 복귀: pill → listening (대기)
             def _restore():
                 if not self.is_translating and not self.is_dictating:
-                    self.title = ICON_IDLE
                     self._pill.set_state("listening")
                     build_menu(self)
             self._ui(_restore)
@@ -379,7 +373,7 @@ class WhisperKoApp(rumps.App):
 
         전사 → 번역 → 오버레이(한글) + 로그(영어) + 세션 누적.
         """
-        self._ui(lambda: setattr(self, "title", ICON_PROCESSING))
+        self._ui(lambda: setattr(self, "title", ICON_TRANSLATING))
 
         try:
             model = self.cfg.get("model", "mlx-community/whisper-large-v3-turbo")
