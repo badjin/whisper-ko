@@ -7,10 +7,13 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Callable
 
 from pynput import keyboard
+
+logger = logging.getLogger(__name__)
 
 
 # ── 핫키 문자열 → 사람이 읽기 좋은 포맷 ──────────────────────
@@ -46,12 +49,30 @@ def format_hotkey(hotkey: str) -> str:
     return "".join(result)
 
 
+# ── macOS virtual keycode → 영문자 매핑 ─────────────────────
+# 한글 등 비-ASCII 입력기가 활성화되면 key.char가 한글을 반환하므로
+# vk(virtual keycode)로 폴백하여 영문자를 판별해야 한다.
+
+_VK_TO_CHAR: dict[int, str] = {
+    0x00: "a", 0x01: "s", 0x02: "d", 0x03: "f", 0x04: "h",
+    0x05: "g", 0x06: "z", 0x07: "x", 0x08: "c", 0x09: "v",
+    0x0B: "b", 0x0C: "q", 0x0D: "w", 0x0E: "e", 0x0F: "r",
+    0x10: "y", 0x11: "t", 0x12: "1", 0x13: "2", 0x14: "3",
+    0x15: "4", 0x16: "6", 0x17: "5", 0x18: "=", 0x19: "9",
+    0x1A: "7", 0x1B: "-", 0x1C: "8", 0x1D: "0", 0x1E: "]",
+    0x1F: "o", 0x20: "u", 0x21: "[", 0x22: "i", 0x23: "p",
+    0x25: "l", 0x26: "j", 0x27: "'", 0x28: "k", 0x29: ";",
+    0x2A: "\\", 0x2B: ",", 0x2C: "/", 0x2D: "n", 0x2E: "m",
+    0x2F: ".", 0x32: "`",
+}
+
 # ── pynput 키 정규화 ─────────────────────────────────────────
 
 def _norm_key(key) -> object:
     """pynput key 객체를 비교 가능한 표준 형태로 정규화.
 
     ctrl_l/ctrl_r → ctrl, shift_l/shift_r → shift 등.
+    한글 입력기가 활성화되면 key.char 대신 key.vk로 영문자를 판별한다.
     """
     if key in (keyboard.Key.ctrl, keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
         return keyboard.Key.ctrl
@@ -65,8 +86,14 @@ def _norm_key(key) -> object:
         return keyboard.Key.space
 
     # 일반 문자 키
-    if isinstance(key, keyboard.KeyCode) and key.char:
-        return ("char", key.char.lower())
+    if isinstance(key, keyboard.KeyCode):
+        # 1) key.char가 ASCII 문자면 바로 사용
+        if key.char and key.char.isascii() and key.char.isprintable():
+            return ("char", key.char.lower())
+        # 2) 한글 등 비-ASCII → vk(virtual keycode)로 영문자 판별
+        vk = getattr(key, "vk", None)
+        if vk is not None and vk in _VK_TO_CHAR:
+            return ("char", _VK_TO_CHAR[vk])
 
     return key
 
@@ -184,15 +211,17 @@ class HotkeyManager:
     def _on_press(self, key) -> None:
         nk = _norm_key(key)
         self._current_keys.add(nk)
+        logger.debug("KEY PRESS: raw=%r  norm=%r  current=%s", key, nk, self._current_keys)
 
         with self._lock:
             for hk_str, (keyset, callback) in self._bindings.items():
                 if not self._fired.get(hk_str) and keyset.issubset(self._current_keys):
                     self._fired[hk_str] = True
+                    logger.info("HOTKEY MATCHED: %s", hk_str)
                     try:
                         callback()
                     except Exception:
-                        pass
+                        logger.exception("Hotkey callback error: %s", hk_str)
 
     def _on_release(self, key) -> None:
         nk = _norm_key(key)

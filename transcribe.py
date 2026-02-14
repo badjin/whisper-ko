@@ -70,6 +70,8 @@ def transcribe(
     audio_path: str,
     model: str = DEFAULT_MODEL,
     language: str | None = "ko",
+    raw: bool = False,
+    initial_prompt: str | None = None,
 ) -> dict:
     """음성 파일을 텍스트로 전사한다.
 
@@ -91,23 +93,30 @@ def transcribe(
             "path_or_hf_repo": model,
             # hallucination 억제: 이전 텍스트 컨텍스트 전파 차단
             "condition_on_previous_text": False,
-            # 무음 구간 hallucination 감지 (초 단위)
-            "hallucination_silence_threshold": 0.5,
-            # no_speech 확률이 높으면 텍스트 무시 (기본 0.6 → 더 엄격)
-            "no_speech_threshold": 0.4,
-            # 압축 비율 임계값 (반복 텍스트 감지)
-            "compression_ratio_threshold": 2.0,
         }
+
+        if raw:
+            # raw 모드: 웨이크 워드 체크용 — 최대한 관대하게
+            kwargs["no_speech_threshold"] = 0.8
+            kwargs["compression_ratio_threshold"] = 3.0
+        else:
+            # 일반 모드: 환각 억제 강화
+            kwargs["hallucination_silence_threshold"] = 0.5
+            kwargs["no_speech_threshold"] = 0.4
+            kwargs["compression_ratio_threshold"] = 2.0
+
         if language is not None:
             kwargs["language"] = language
+        if initial_prompt is not None:
+            kwargs["initial_prompt"] = initial_prompt
 
         result = mlx_whisper.transcribe(audio_path, **kwargs)
 
         text = (result.get("text") or "").strip()
         detected_language = result.get("language", language or "unknown")
 
-        # hallucination 필터링
-        if _is_hallucination(text):
+        # hallucination 필터링 (raw=True이면 건너뜀, 웨이크 워드 체크용)
+        if not raw and _is_hallucination(text):
             logger.debug("Hallucination 필터됨: %r", text)
             text = ""
 

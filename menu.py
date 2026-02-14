@@ -46,6 +46,13 @@ TRANSLATION_HOTKEY_PRESETS: list[tuple[str, str]] = [
     ("ctrl+shift+l", "⌃⇧L"),
 ]
 
+JARVIS_HOTKEY_PRESETS: list[tuple[str, str]] = [
+    ("ctrl+shift+j", "⌃⇧J"),
+    ("ctrl+shift+k", "⌃⇧K"),
+    ("cmd+shift+j", "⌘⇧J"),
+    ("ctrl+alt+j", "⌃⌥J"),
+]
+
 # ── Translation output modes ───────────────────────────
 # (mode_key, display_label)
 TRANSLATION_OUTPUT_OPTIONS: list[tuple[str, str]] = [
@@ -93,6 +100,20 @@ def build_menu(app: WhisperKoApp) -> None:
 
     menu.add(rumps.separator)
 
+    # ── Jarvis toggle ────────────────────────────────────
+    jarvis_hk = config.get("jarvis_hotkey", "ctrl+shift+j")
+    jhk_display = format_hotkey(jarvis_hk)
+
+    if app.is_jarvis_active:
+        jlabel = f"Stop Jarvis ({jhk_display})"
+    else:
+        jlabel = f"Start Jarvis ({jhk_display})"
+
+    jarvis_item = rumps.MenuItem(jlabel, callback=lambda _: app._toggle_jarvis())
+    menu.add(jarvis_item)
+
+    menu.add(rumps.separator)
+
     # ── Translation output submenu ──────────────────────
     output_submenu = rumps.MenuItem("Translation Output")
     current_output = config.get("translation_output", "overlay")
@@ -134,6 +155,17 @@ def build_menu(app: WhisperKoApp) -> None:
         )
         translation_hk_submenu.add(item)
     hotkey_submenu.add(translation_hk_submenu)
+
+    # Jarvis hotkey
+    jarvis_hk_submenu = rumps.MenuItem("Jarvis")
+    for key, preset_label in JARVIS_HOTKEY_PRESETS:
+        check = "\u2713 " if jarvis_hk == key else "   "
+        item = rumps.MenuItem(
+            f"{check}{preset_label}",
+            callback=lambda sender, k=key: app.set_jarvis_hotkey(k),
+        )
+        jarvis_hk_submenu.add(item)
+    hotkey_submenu.add(jarvis_hk_submenu)
 
     settings_submenu.add(hotkey_submenu)
 

@@ -29,6 +29,16 @@ DEFAULTS: dict = {
         "max_chunk_sec": 8,
     },
     "log_dir": "~/Documents/whisper-ko-logs",
+    "jarvis_hotkey": "ctrl+shift+j",
+    "jarvis": {
+        "wake_word": "위스퍼",
+        "end_word": "완료",
+        "silence_threshold_db": -35,
+        "silence_duration_sec": 0.5,
+        "end_silence_duration_sec": 0.6,
+        "max_listen_sec": 4,
+        "max_record_sec": 60,
+    },
 }
 
 
