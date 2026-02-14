@@ -119,6 +119,7 @@ class WhisperKoApp(rumps.App):
         build_menu(self)
 
         # ── Pill 위젯 표시 (앱 시작 시 항상 보임) ────────
+        self._pill.position_near_focused_input()
         self._pill.set_state("listening")
 
     # ══════════════════════════════════════════════════════
@@ -219,6 +220,7 @@ class WhisperKoApp(rumps.App):
             return
 
         self.is_dictating = True
+        self._pill.position_near_focused_input()
         self._pill.set_state("recording")
         build_menu(self)
 

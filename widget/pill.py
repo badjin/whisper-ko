@@ -215,6 +215,8 @@ class PillWidget:
             | AppKit.NSWindowCollectionBehaviorStationary
         )
         self._panel.setHidesOnDeactivate_(False)
+        self._panel.setMovableByWindowBackground_(True)
+        self._panel.setMovable_(True)
 
         content = self._panel.contentView()
         content.setWantsLayer_(True)
@@ -275,6 +277,101 @@ class PillWidget:
     # ══════════════════════════════════════════════════════
     # 공개 API
     # ══════════════════════════════════════════════════════
+
+    def position_near_focused_input(self) -> None:
+        """활성 입력창 근처에 pill 위젯을 위치시킨다.
+
+        1순위: Accessibility API로 포커스된 UI 요소 위치 감지
+        2순위: 마우스 커서 위치 기반 배치
+        """
+        if self._panel is None:
+            return
+
+        screen = AppKit.NSScreen.mainScreen()
+        if screen is None:
+            return
+        sf = screen.frame()
+        screen_h = sf.size.height
+
+        # 1순위: Accessibility API로 포커스된 입력창 위치
+        pos = self._get_focused_element_position(screen_h)
+
+        if pos is not None:
+            ax_x, ax_y, elem_w, elem_h = pos
+            gap = 8
+            pill_x = ax_x + (elem_w - PILL_WIDTH) / 2
+            # AX (top-left) → NS (bottom-left): 입력창 바로 위
+            pill_y = screen_h - ax_y + gap
+
+            # 화면 위로 벗어나면 입력창 아래에 배치
+            if pill_y + PILL_HEIGHT > sf.origin.y + sf.size.height:
+                pill_y = screen_h - (ax_y + elem_h) - PILL_HEIGHT - gap
+        else:
+            # 2순위: 마우스 커서 위치 기반 (NS 좌표)
+            mouse = AppKit.NSEvent.mouseLocation()
+            pill_x = mouse.x - PILL_WIDTH / 2
+            pill_y = mouse.y + 20  # 커서 위 20px
+
+        # 화면 경계 보정
+        pill_x = max(
+            sf.origin.x,
+            min(pill_x, sf.origin.x + sf.size.width - PILL_WIDTH),
+        )
+        pill_y = max(
+            sf.origin.y,
+            min(pill_y, sf.origin.y + sf.size.height - PILL_HEIGHT),
+        )
+
+        self._panel.setFrameOrigin_(Foundation.NSMakePoint(pill_x, pill_y))
+
+    def _get_focused_element_position(self, screen_h: float):
+        """Accessibility API로 포커스된 요소의 위치를 반환한다.
+
+        Returns:
+            (ax_x, ax_y, elem_w, elem_h) 또는 None
+        """
+        try:
+            from ApplicationServices import (
+                AXUIElementCreateSystemWide,
+                AXUIElementCopyAttributeValue,
+                AXValueGetValue,
+                kAXValueTypeCGPoint,
+                kAXValueTypeCGSize,
+            )
+
+            system_wide = AXUIElementCreateSystemWide()
+
+            err, focused = AXUIElementCopyAttributeValue(
+                system_wide, "AXFocusedUIElement", None
+            )
+            if err != 0 or focused is None:
+                return None
+
+            err, pos_val = AXUIElementCopyAttributeValue(
+                focused, "AXPosition", None
+            )
+            if err != 0 or pos_val is None:
+                return None
+
+            ok, point = AXValueGetValue(pos_val, kAXValueTypeCGPoint, None)
+            if not ok:
+                return None
+
+            err, size_val = AXUIElementCopyAttributeValue(
+                focused, "AXSize", None
+            )
+            if err != 0 or size_val is None:
+                return None
+
+            ok, size = AXValueGetValue(size_val, kAXValueTypeCGSize, None)
+            if not ok:
+                return None
+
+            return (point.x, point.y, size.width, size.height)
+
+        except Exception:
+            logger.debug("AX API 사용 불가", exc_info=True)
+            return None
 
     def set_state(self, state: str) -> None:
         logger.info("pill set_state(%r)", state)
